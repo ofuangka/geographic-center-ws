@@ -74,7 +74,7 @@
             function isValidGroupJoin(data) {
                 return data !== 'ping';
             }
-
+            console.log(message);
             var groupId, i, len, data = JSON.parse(message);
             if (isValidGroupJoin(data)) {
                 groupId = data.groupId;
