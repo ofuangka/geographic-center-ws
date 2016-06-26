@@ -5,7 +5,12 @@
         redirectUrl = process.env.REDIRECT_URL,
         expectedOrigin = process.env.EXPECTED_ORIGIN;
 
+    /**
+     * Create a web server that handles requests by redirecting them to a URL, 
+     * configured at process.env.REDIRECT_URL
+     */
     var server = http.createServer(function requestListener(request, response) {
+
         /* just redirect */
         response.writeHead(302, {
             Location: redirectUrl
@@ -15,25 +20,39 @@
     server.listen(port);
     console.log('http server listening on %d', port);
 
+    /**
+     * The real functionality is the WebSocketServer, which sends group 
+     * messages to group members
+     */
     var wsServer = new WebSocketServer({
             server: server,
+
+            /** only handshake requests that come from
+             *  the origin configured at process.env.EXPECTED_ORIGIN 
+             */
             verifyClient: function verifyClient(info) {
                 console.log('handshake: ' + info.origin);
                 return expectedOrigin === info.origin;
             }
         }),
         groups = {},
+        sequences = {},
         printableGroups = {},
         counter = 0;
 
     wsServer.on('connection', function socketDidConnect(socket) {
         console.log('socket ' + (++counter) + ' connected');
 
+        /**
+         * This function adds the socket to the group with groupId, meaning it will
+         * receive all messages sent to that group
+         */
         function addSocketToGroup(groupId) {
 
             /* create the group if it does not yet exist */
             if (!(groupId in groups)) {
                 groups[groupId] = [];
+                sequences[groupId] = 0;
                 printableGroups[groupId] = [];
             }
 
@@ -44,6 +63,9 @@
             console.log('groupAdd: ' + JSON.stringify(printableGroups));
         }
 
+        /**
+         * This function removes the socket from all groups
+         */
         function removeSocketFromGroups() {
             var i, len, groupId, member;
 
@@ -71,13 +93,26 @@
 
         /* each message is considered to be a group join. */
         socket.on('message', function socketDidSendMessage(message, flags) {
-            function isValidGroupJoin(data) {
-                return data !== 'ping';
+            function isPing(data) {
+                return data === 'ping';
             }
 
-            var groupId, i, len, data = JSON.parse(message);
-            if (isValidGroupJoin(data)) {
+            var groupId, i, len, data = JSON.parse(message), newMember;
+            if (isPing(data)) {
+                /* ignore pings */
+            } else {
                 groupId = data.groupId;
+
+                /* construct a new member object */
+                newMember = {
+                    id: data.id,
+                    username: data.username,
+                    groupId: groupId,
+                    userId: data.userId,
+                    lat: data.lat,
+                    lng: data.lng,
+                    lastUpdatedTs: data.lastUpdatedTs
+                };
 
                 /* we consider this to be a new group join, so remove the socket from previous groups */
                 removeSocketFromGroups();
@@ -86,20 +121,12 @@
                 /* notify all the group members of the event */
                 for (i = 0, len = groups[groupId].length; i < len; i++) {
                     groups[groupId][i].send(JSON.stringify({
-                        id: data.id,
-                        username: data.username,
-                        groupId: groupId,
-                        userId: data.userId,
-                        lat: data.lat,
-                        lng: data.lng,
-                        lastUpdatedTs: data.lastUpdatedTs
+                        sequence: sequences[groupId]++,
+                        member: newMember
                     }));
                 }
 
-            } else {
-                /* the message wasn't valid, so don't do anything with it */
             }
-
         });
         socket.on('close', function socketDidClose() {
             removeSocketFromGroups();
